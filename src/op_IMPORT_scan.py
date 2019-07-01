@@ -7,7 +7,7 @@ class import_scan(bpy.types.Operator, ImportHelper):
     bl_label  = "Import"
     bl_options = {"REGISTER", "UNDO"}
     filter_glob = bpy.props.StringProperty(
-        default="*.obj;*.ply;*.stl;*.fbx;*.dae;*.x3d;*.wrl",
+        default="*.obj;*.ply;*.stl;*.fbx;*.dae;*.x3d;*.wrl;*.gltf",
         options={'HIDDEN'},
     )
 
@@ -49,6 +49,8 @@ class import_scan(bpy.types.Operator, ImportHelper):
             bpy.ops.wm.collada_import(filepath=path)
         elif ext==".wrl" or ext==".x3d":
             bpy.ops.import_scene.x3d(filepath=path)
+        elif ext == ".gltf" or ext == ".gltf":
+            bpy.ops.import_scene.gltf(filepath=path)
         else:
             return {'CANCELLED'}
 

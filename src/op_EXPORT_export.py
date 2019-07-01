@@ -11,8 +11,8 @@ class export(bpy.types.Operator, ExportHelper):
 
     filename_ext=".fbx"
     filter_glob = bpy.props.StringProperty(
-        default="*.fbx;*.obj;*.ply",
-        options={'HIDDEN'},
+        default="*.fbx;*.obj;*.ply;*.gltf",
+        # options={'HIDDEN'},
     )
 
     fmt      = bpy.props.EnumProperty(items= ( ('PNG', 'PNG', 'PNG'), ("JPEG", "JPEG", "JPEG")) , name="fmt", description="Image format", default="JPEG")
@@ -77,6 +77,8 @@ class export(bpy.types.Operator, ExportHelper):
                 os.remove(self.filepath.replace(".obj", ".mtl"))
         elif self.filepath.endswith("ply"):
             bpy.ops.export_mesh.ply(filepath = self.filepath)
+        elif self.filepath.endswith("gltf"):
+            bpy.ops.export_mesh.gltf(filepath=self.filepath)
         else:
             print("File format not supported!")
             return {"CANCELLED"}

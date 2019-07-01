@@ -65,15 +65,13 @@ class bake_cycles_textures(bpy.types.Operator):
     bl_options = {"REGISTER", "UNDO"}
 
     resolution     = bpy.props.IntProperty( name="resolution",     description="image resolution", default=1024, min=128, max=8192)
-    cageRatio      = bpy.props.FloatProperty(name="cageRatio",     description="baking cage size as a ratio", default=0.02, min=0.00001, max=5)
+    cageRatio      = bpy.props.FloatProperty(name="cageRatio",     description="baking cage size as a ratio", default=0.1, min=0.00001, max=5)
     bake_albedo    = bpy.props.BoolProperty(name="bake_albedo",    description="albedo", default=True)
     bake_ao        = bpy.props.BoolProperty(name="bake_ao",        description="ambient occlusion", default=False)
     bake_geometry  = bpy.props.BoolProperty(name="bake_geometry",  description="geometric normals", default=True)
     bake_surface   = bpy.props.BoolProperty(name="bake_surface",   description="material normals", default=False)
     bake_metallic  = bpy.props.BoolProperty(name="bake_metallic",  description="metalness", default=False)
     bake_roughness = bpy.props.BoolProperty(name="bake_roughness", description="roughness", default=False)
-    bake_transmission = bpy.props.BoolProperty(name="bake_transmission",  description="transmission", default=False)
-    bake_subsurface = bpy.props.BoolProperty(name="bake_subsurface",  description="subsurface", default=False)
     bake_emission  = bpy.props.BoolProperty(name="bake_emission",  description="emission", default=False)
     bake_opacity   = bpy.props.BoolProperty(name="bake_opacity",   description="opacity", default=False)
 
@@ -93,8 +91,6 @@ class bake_cycles_textures(bpy.types.Operator):
         box.prop(self, "bake_geometry", text="Geometric normals")
         box.prop(self, "bake_surface",  text="Surface normals")
         box.prop(self, "bake_ao",       text="Ambient occlusion")
-        box.prop(self, "bake_transmission", text="Transmission")
-        box.prop(self, "bake_subsurface", text="Subsurface")
         box.prop(self, "bake_emission", text="Emission")
         box.prop(self, "bake_opacity",  text="Opacity")
         col = self.layout.column(align=True)
@@ -104,11 +100,8 @@ class bake_cycles_textures(bpy.types.Operator):
         #Render engine must be cycles
         if bpy.context.scene.render.engine!="CYCLES":
             return 0
-        #Object mode
-        if context.mode!="OBJECT":
-            return 0
         #If more than two objects are selected
-        if len(context.selected_objects)<2:
+        if len(context.selected_objects)!=2:
             return 0
         #If no object is active
         if context.active_object is None:
@@ -118,15 +111,15 @@ class bake_cycles_textures(bpy.types.Operator):
             if o.type != "MESH":
                 return 0
         #The source object must have correct materials
-        sources = [o for o in context.selected_objects if o!=context.active_object]
+        source = [o for o in context.selected_objects if o!=context.active_object][0] if len(context.selected_objects)==2 else context.active_object
         target = context.active_object
-
         #Each material must be not None and have nodes
-        for source in sources:
-            if source.active_material is None:
-                return 0
-            if source.active_material.use_nodes == False:
-                return 0
+        if source.active_material is None:
+            return 0
+        if source.active_material.use_nodes == False:
+            return 0
+        if context.mode!="OBJECT":
+            return 0
         #The target object must have a UV layout
         if len(target.data.uv_layers) == 0:
             return 0
@@ -135,18 +128,24 @@ class bake_cycles_textures(bpy.types.Operator):
     def execute(self, context):
 
         #Find which object is the source and which is the target
-        target  = context.active_object
-        sources = [o for o in context.selected_objects if o!=target]
+        source, target = None, None
+        if len(context.selected_objects) == 1:
+            source = target = context.selected_objects[0]
+        if len(context.selected_objects) == 2:
+            target = [o for o in context.selected_objects if o==context.active_object][0]
+            source = [o for o in context.selected_objects if o!=target][0]
+
+        #Get the source material
+        material  = source.active_material
 
         # Set the baking parameters
         bpy.data.scenes["Scene"].render.bake.use_selected_to_active = True
         bpy.data.scenes["Scene"].cycles.bake_type = 'EMIT'
         bpy.data.scenes["Scene"].cycles.samples   = 1
         bpy.data.scenes["Scene"].render.bake.margin = 8
+        dims = source.dimensions
         bpy.data.scenes["Scene"].render.bake.use_cage = True
-        dims = target.dimensions
-        maxdim = max(max(dims[0], dims[1]), dims[2])
-        bpy.data.scenes["Scene"].render.bake.cage_extrusion = self.cageRatio * maxdim
+        bpy.data.scenes["Scene"].render.bake.cage_extrusion = self.cageRatio * max(max(dims[0], dims[1]), dims[2])
 
         #Proceed to the different channels baking
         toBake = collections.OrderedDict()
@@ -154,8 +153,6 @@ class bake_cycles_textures(bpy.types.Operator):
         toBake["Metallic"]   = self.bake_metallic
         toBake["Roughness"]  = self.bake_roughness
         toBake["Normal"]     = self.bake_surface
-        toBake["Transmission"] = self.bake_transmission
-        toBake["Subsurface"] = self.bake_subsurface
         toBake["Emission"]   = self.bake_emission
         toBake["Opacity"]    = self.bake_opacity
 
@@ -172,18 +169,10 @@ class bake_cycles_textures(bpy.types.Operator):
 
                 print("Baking the channel: %s" % baketype)
 
-                #Copy all the objects' materials, and modify them them
-                MATERIALS = []
-                for source in sources:
-                    MATS = [None for i in range(len(source.material_slots))]
-                    for i, slot in enumerate(source.material_slots):
-                        if slot.material is not None:
-                            if slot.material.use_nodes:
-                                MATS[i] = slot.material
-                                tmpMat      = fn_bake.create_source_baking_material(slot.material, baketype)
-                                tmpMat.name = slot.material.name + "_" + baketype
-                                source.material_slots[i].material = tmpMat
-                    MATERIALS.append(MATS)
+                #Copy the active material, and assign it to the source
+                tmpMat      = fn_bake.create_source_baking_material(material, baketype)
+                tmpMat.name = material.name + "_" + baketype
+                source.active_material = tmpMat
 
                 #Create a material for the target
                 targetMat = fn_bake.create_target_baking_material(target)
@@ -203,16 +192,10 @@ class bake_cycles_textures(bpy.types.Operator):
                 bpy.ops.object.bake(type="EMIT")
                 baked[baketype] = imgNode.image
 
-                #Restore the original materials
-                for i, source in enumerate(sources):
-                    for j, slot in enumerate(source.material_slots):
-                        if MATERIALS[i][j] is not None:
-                            if baketype != "Roughness": #DEBUG
-                                bpy.data.materials.remove(source.material_slots[j].material)
-                            source.material_slots[j].material = MATERIALS[i][j]
-
-                #Do some clean up
+                #Remove the material and reassign the original one
                 targetMat.node_tree.nodes.remove(imgNode)
+                source.active_material = material
+                bpy.data.materials.remove(tmpMat)
                 bpy.data.scenes["Scene"].render.bake.use_clear = True
 
         #Bake the AO
@@ -242,8 +225,6 @@ class bake_cycles_textures(bpy.types.Operator):
             "metallic":  baked["Metallic"]   if self.bake_metallic else None,
             "roughness": baked["Roughness"]  if self.bake_roughness else None,
             "normal":    baked["Normals"]    if self.bake_geometry or self.bake_surface else None,
-            "transmission": baked["Transmission"] if self.bake_transmission else None,
-            "subsurface": baked["Subsurface"] if self.bake_subsurface else None,
             "emission":  baked["Emission"]   if self.bake_emission else None,
             "opacity":   baked["Opacity"]    if self.bake_opacity else None
         }

@@ -5,34 +5,6 @@ import numpy as np
 
 import tempfile
 
-def is_attached_to_normalmap_somehow(node):
-    def get_after_nodes(node):
-        """Returns a list of the node's immediate neighbors"""
-        _neighs = []
-        for _output in [x for x in node.outputs if x.name=="Color"]:
-            if len(_output.links)>0:
-                for _link in _output.links:
-                    _neighs.append(_link.to_node)
-        return _neighs
-    def get_linked_nodes(node):
-        """Returns a list of all the node's connected nodes"""
-        _linkedNodes = [node]
-        _neighs = [node]
-        while len(_neighs):
-            _newNeighs = []
-            for _node in _neighs:
-                for _neigh in get_after_nodes(_node):
-                    if _neigh not in _linkedNodes:
-                        _newNeighs.append(_neigh)
-                        _linkedNodes.append(_neigh)
-            _neighs = _newNeighs
-        return _linkedNodes
-    AFTER = get_linked_nodes(node)
-    for a in AFTER:
-        if a.type=="NORMAL_MAP":
-            return True
-    return False
-
 def copy_cycles_material(material, name=None):
 
     _new_material = material.copy()
@@ -214,24 +186,17 @@ def create_source_baking_material(material, channel):
             _input_node = fill_input_slot(n["node"], n["tree"], channel)
             convert_principled_to_emission(n["node"], n["tree"], _input_node)
 
-    #Turn all textures to colors whn baking the normals, except the normals themselves
+    #Turn all non colors textures, except normals, to colors
     _image_nodes = get_all_nodes_in_material(_new_material, "TEX_IMAGE")
     for n in [x["node"] for x in _image_nodes]:
         if len(n.outputs["Color"].links)>0:
-            if channel == "Normal":
-                if not is_attached_to_normalmap_somehow(n):
-                    n.color_space = "COLOR"
-
-    #Add a gamma correction for metalness, roughness, transmission...
-    if channel!="Normal" and channel!="Base Color":
-        _emission_nodes = get_all_nodes_in_material(_new_material, "EMISSION")
-        for emit in _emission_nodes:
-            _gamma = emit["tree"].nodes.new(type="ShaderNodeGamma")
-            _gamma.inputs["Gamma"].default_value = 2.2
-            if len(emit["node"].inputs["Color"].links)>0:
-                emit['tree'].links.new(emit["node"].inputs["Color"].links[0].from_socket, _gamma.inputs["Color"])
-                emit['tree'].links.new(_gamma.outputs["Color"], emit["node"].inputs["Color"])
-
+            isNormal = False
+            for l in n.outputs["Color"].links:
+                if l.to_node is not None:
+                    if l.to_node.type=="NORMAL_MAP":
+                        isNormal = True
+            if not isNormal:
+                n.color_space = "COLOR"
     return _new_material
 
 def create_target_baking_material(obj):
